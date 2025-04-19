@@ -46,7 +46,7 @@ class DoublyLinkedList:
             return self.insertar_al_frente(vuelo)
         if pos == self.size:
             return self.insertar_al_final(vuelo)
-        
+
         nuevo = Node(vuelo)
         actual = self.head
         for _ in range(pos):
@@ -74,3 +74,15 @@ class DoublyLinkedList:
             self.tail = actual.prev
         self.size -= 1
         return actual.data
+
+    def listar(self):
+        vuelos = []
+        actual = self.head
+        while actual:
+            vuelos.append(actual.data)
+            actual = actual.next
+        return vuelos
+
+    def clear(self):
+        self.head = self.tail = None
+        self.size = 0

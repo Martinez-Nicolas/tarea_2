@@ -1,5 +1,3 @@
-#uvicorn main:app --reload
-
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -8,94 +6,65 @@ from database import get_db
 from doubly_linked import DoublyLinkedList
 from typing import List
 
-app = FastAPI()
+app = FastAPI(title="Gestor de Vuelos")
 
-# Creamos una instancia de la lista doblemente enlazada para manejar los vuelos
-vuelos_lista = DoublyLinkedList()
+dll_vuelos = DoublyLinkedList()
 
-# 1. POST /vuelos - Agregar un vuelo (normal o emergencia)
 @app.post("/vuelos", response_model=VueloBase)
 def agregar_vuelo(vuelo: VueloBase, al_frente: bool = False, db: Session = Depends(get_db)):
-    db_vuelo = Vuelo(nombre=vuelo.nombre, tipo=vuelo.tipo, prioridad=vuelo.prioridad)
-    
+    nuevo_vuelo = Vuelo(**vuelo.dict())
     if al_frente:
-        vuelos_lista.insertar_al_frente(db_vuelo)  # Agregar al frente usando la lista doblemente enlazada
+        dll_vuelos.insertar_al_frente(nuevo_vuelo)
     else:
-        vuelos_lista.insertar_al_final(db_vuelo)  # Agregar al final usando la lista doblemente enlazada
-    
-    return db_vuelo
+        dll_vuelos.insertar_al_final(nuevo_vuelo)
+    return nuevo_vuelo
 
-# 2. GET /vuelos/total - Retorna el número total de vuelos
 @app.get("/vuelos/total")
-def total_vuelos(db: Session = Depends(get_db)):
-    return {"total": vuelos_lista.longitud()}  # Retornar el tamaño de la lista
+def total_vuelos():
+    return {"total": dll_vuelos.longitud()}
 
-# 3. GET /vuelos/proximo - Retorna el primer vuelo sin remover
 @app.get("/vuelos/proximo", response_model=VueloBase)
-def proximo_vuelo(db: Session = Depends(get_db)):
-    db_vuelo = vuelos_lista.obtener_primero()  # Obtener el primer vuelo de la lista
-    if db_vuelo is None:
+def obtener_proximo():
+    vuelo = dll_vuelos.obtener_primero()
+    if not vuelo:
         raise HTTPException(status_code=404, detail="No hay vuelos disponibles.")
-    return db_vuelo
+    return vuelo
 
-# 4. GET /vuelos/ultimo - Retorna el último vuelo sin remover
 @app.get("/vuelos/ultimo", response_model=VueloBase)
-def ultimo_vuelo(db: Session = Depends(get_db)):
-    db_vuelo = vuelos_lista.obtener_ultimo()  # Obtener el último vuelo de la lista
-    if db_vuelo is None:
+def obtener_ultimo():
+    vuelo = dll_vuelos.obtener_ultimo()
+    if not vuelo:
         raise HTTPException(status_code=404, detail="No hay vuelos disponibles.")
-    return db_vuelo
+    return vuelo
 
-# 5. POST /vuelos/insertar - Inserta un vuelo en una posición específica
 @app.post("/vuelos/insertar", response_model=VueloBase)
-def insertar_vuelo(vuelo: VueloBase, posicion: int, db: Session = Depends(get_db)):
-    if posicion < 0 or posicion >= vuelos_lista.longitud():
+def insertar_en_posicion(vuelo: VueloBase, posicion: int):
+    if posicion < 0 or posicion > dll_vuelos.longitud():
         raise HTTPException(status_code=400, detail="Posición inválida.")
-    
-    # Crear el nuevo vuelo que se quiere insertar
-    db_vuelo = Vuelo(nombre=vuelo.nombre, tipo=vuelo.tipo, prioridad=vuelo.prioridad)
-    
-    # Insertar el vuelo en la lista doblemente enlazada en la posición especificada
-    vuelos_lista.insertar_en_posicion(db_vuelo, posicion)
-    
-    # Devolver el vuelo insertado
-    return {"mensaje": "Vuelo insertado correctamente", "vuelo": db_vuelo}
+    nuevo_vuelo = Vuelo(**vuelo.dict())
+    dll_vuelos.insertar_en_posicion(nuevo_vuelo, posicion)
+    return nuevo_vuelo
 
-# 6. DELETE /vuelos/extraer - Elimina un vuelo de una posición específica
-@app.delete("/vuelos/extraer", response_model=VueloBase)
-def extraer_vuelo(posicion: int, db: Session = Depends(get_db)):
-    if posicion < 0 or posicion >= vuelos_lista.longitud():
+@app.delete("/vuelos/extraer")
+def extraer_vuelo(posicion: int):
+    if posicion < 0 or posicion >= dll_vuelos.longitud():
         raise HTTPException(status_code=400, detail="Posición inválida.")
-    
-    vuelo_extraido = vuelos_lista.extraer_de_posicion(posicion)  # Eliminar vuelo de la posición especificada
-    return {"mensaje": "Vuelo extraído correctamente", "vuelo": vuelo_extraido}
+    vuelo = dll_vuelos.extraer_de_posicion(posicion)
+    return {"mensaje": "Vuelo extraído correctamente", "vuelo": vuelo}
 
-# 7. GET /vuelos/lista - Lista todos los vuelos en orden actual
 @app.get("/vuelos/lista", response_model=List[VueloBase])
-def listar_vuelos(db: Session = Depends(get_db)):
-    vuelos = []
-    current = vuelos_lista.head
-    while current:
-        vuelos.append(current.data)
-        current = current.next
-    return vuelos
+def listar_vuelos():
+    return dll_vuelos.listar()
 
-# 8. PATCH /vuelos/reordenar - Reordenar vuelos manualmente
 @app.patch("/vuelos/reordenar")
-def reordenar_vuelos(nueva_orden: List[int], db: Session = Depends(get_db)):
-    vuelos = []
-    current = vuelos_lista.head
-    while current:
-        vuelos.append(current.data)
-        current = current.next
-    
-    if set(nueva_orden) != set(range(len(vuelos))):
+def reordenar_vuelos(nueva_orden: List[int]):
+    vuelos_actuales = dll_vuelos.listar()
+    if set(nueva_orden) != set(range(len(vuelos_actuales))):
         raise HTTPException(status_code=400, detail="Orden inválido.")
-    
-    vuelos_reordenados = [vuelos[i] for i in nueva_orden]
-    vuelos_lista.clear()  # Limpiar la lista antes de agregar los vuelos reordenados
-    
+
+    vuelos_reordenados = [vuelos_actuales[i] for i in nueva_orden]
+    dll_vuelos.clear()
     for vuelo in vuelos_reordenados:
-        vuelos_lista.insertar_al_final(vuelo)  # Insertar de nuevo en el orden reordenado
-    
+        dll_vuelos.insertar_al_final(vuelo)
+
     return {"mensaje": "Vuelos reordenados correctamente"}
